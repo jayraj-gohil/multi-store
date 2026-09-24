@@ -1,0 +1,29 @@
+// Prisma schema — https://www.prisma.io/docs/orm/prisma-schema
+//
+// The connection URL lives in prisma.config.ts (Prisma 7+), read from DATABASE_URL.
+// At runtime the app connects through the `pg` driver adapter (src/config/database.ts).
+//
+// Add business models below, then run:
+//   npm run prisma:migrate -- --name <describe_change>
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Example shape only — replace with the real entities from the requirements.
+//
+// model Example {
+//   id        String   @id @default(uuid())
+//   name      String
+//   createdAt DateTime @default(now()) @map("created_at")
+//   updatedAt DateTime @updatedAt @map("updated_at")
+//
+//   @@map("examples")
+// }
