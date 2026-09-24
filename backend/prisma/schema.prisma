@@ -1,11 +1,3 @@
-// Prisma schema — https://www.prisma.io/docs/orm/prisma-schema
-//
-// The connection URL lives in prisma.config.ts (Prisma 7+), read from DATABASE_URL.
-// At runtime the app connects through the `pg` driver adapter (src/config/database.ts).
-//
-// Add business models below, then run:
-//   npm run prisma:migrate -- --name <describe_change>
-
 generator client {
   provider            = "prisma-client"
   output              = "../src/generated/prisma"
@@ -17,13 +9,251 @@ datasource db {
   provider = "postgresql"
 }
 
-// Example shape only — replace with the real entities from the requirements.
-//
-// model Example {
-//   id        String   @id @default(uuid())
-//   name      String
-//   createdAt DateTime @default(now()) @map("created_at")
-//   updatedAt DateTime @updatedAt @map("updated_at")
-//
-//   @@map("examples")
-// }
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum DiscountType {
+  PRODUCT
+  PLATFORM
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(CUSTOMER)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  orders  Order[]
+  returns Return[]
+
+  @@map("users")
+}
+
+model Store {
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  latitude  Decimal  @db.Decimal(9, 6)
+  longitude Decimal  @db.Decimal(9, 6)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  inventory         StoreInventory[]
+  allocations       OrderAllocation[]
+  returnAllocations ReturnAllocation[]
+
+  @@map("stores")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  // Optional image URL (not a file upload — no file storage exists in this project). Nullable,
+  // so every existing product/query/response works unchanged when it's absent.
+  imageUrl    String?  @map("image_url")
+  price       Decimal  @db.Decimal(10, 2)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  inventory         StoreInventory[]
+  quantityDiscounts ProductQuantityDiscount[]
+  orderItems        OrderItem[]
+  returnItems       ReturnItem[]
+
+  @@map("products")
+}
+
+model StoreInventory {
+  id        String   @id @default(uuid())
+  storeId   String   @map("store_id")
+  productId String   @map("product_id")
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([storeId, productId])
+  @@index([productId])
+  @@map("store_inventory")
+}
+
+model ProductQuantityDiscount {
+  id                 String   @id @default(uuid())
+  productId          String   @map("product_id")
+  minimumQuantity    Int      @map("minimum_quantity")
+  discountPercentage Decimal  @db.Decimal(5, 2) @map("discount_percentage")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("product_quantity_discounts")
+}
+
+model PlatformDiscount {
+  id                 String   @id @default(uuid())
+  minimumOrderAmount Decimal  @db.Decimal(10, 2) @map("minimum_order_amount")
+  discountPercentage Decimal  @db.Decimal(5, 2) @map("discount_percentage")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_discounts")
+}
+
+model Order {
+  id                String        @id @default(uuid())
+  customerId        String        @map("customer_id")
+  // Live values — recalculated after every return using the remaining (not returned) quantities.
+  // Every screen that already reads these fields automatically reflects the post-return state.
+  subtotal          Decimal       @db.Decimal(10, 2)
+  discountAmount    Decimal       @default(0) @db.Decimal(10, 2) @map("discount_amount")
+  totalAmount       Decimal       @db.Decimal(10, 2) @map("total_amount")
+  discountType      DiscountType? @map("discount_type")
+  // Immutable snapshot of the above, captured once at order creation. Never touched by a return —
+  // this is the only place "what was originally charged" is preserved once returns start changing
+  // the live fields above.
+  originalSubtotal       Decimal       @db.Decimal(10, 2) @map("original_subtotal")
+  originalDiscountAmount Decimal       @default(0) @db.Decimal(10, 2) @map("original_discount_amount")
+  originalTotalAmount    Decimal       @db.Decimal(10, 2) @map("original_total_amount")
+  originalDiscountType   DiscountType? @map("original_discount_type")
+  // Running total of ReturnItem.returnAmount across all returns on this order (informational).
+  totalReturnedAmount Decimal @default(0) @db.Decimal(10, 2) @map("total_returned_amount")
+  status            OrderStatus   @default(PENDING)
+  customerLatitude  Decimal       @db.Decimal(9, 6) @map("customer_latitude")
+  customerLongitude Decimal       @db.Decimal(9, 6) @map("customer_longitude")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  customer User        @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+  returns  Return[]
+
+  @@index([customerId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  String  @id @default(uuid())
+  orderId             String  @map("order_id")
+  productId           String  @map("product_id")
+  productNameSnapshot String  @map("product_name_snapshot")
+  unitPrice           Decimal @db.Decimal(10, 2) @map("unit_price")
+  quantity            Int
+  // How much of `quantity` has been returned so far (across possibly several partial returns).
+  // Returnable quantity = quantity - returnedQuantity. Updated via an atomic conditional update
+  // (WHERE quantity - returned_quantity >= requested) so concurrent returns can never oversell.
+  returnedQuantity    Int     @default(0) @map("returned_quantity")
+  // discountAmount/lineTotal are live — recalculated (like Order's) after every return, using the
+  // remaining quantity. The original purchased quantity/price above are never changed.
+  discountAmount      Decimal @default(0) @db.Decimal(10, 2) @map("discount_amount")
+  lineTotal           Decimal @db.Decimal(10, 2) @map("line_total")
+
+  order       Order             @relation(fields: [orderId], references: [id])
+  product     Product           @relation(fields: [productId], references: [id])
+  allocations OrderAllocation[]
+  returnItems ReturnItem[]
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderAllocation {
+  id          String @id @default(uuid())
+  orderItemId String @map("order_item_id")
+  storeId     String @map("store_id")
+  quantity    Int
+  // Position among this order item's allocations in the order they were created (0,1,2,...).
+  // A return restores inventory to stores in this same order — i.e. it "unwinds" the original
+  // allocation decision, not a fresh nearest-store search — so this must be deterministic and
+  // can't rely on timestamp precision (several allocations can be created in the same millisecond).
+  sequence    Int    @default(0)
+  // How much of `quantity` has already been restored by a return. Restorable-from-this-store
+  // amount = quantity - returnedQuantity. Same atomic-conditional-update pattern as above.
+  returnedQuantity Int @default(0) @map("returned_quantity")
+
+  orderItem         OrderItem          @relation(fields: [orderItemId], references: [id])
+  store             Store              @relation(fields: [storeId], references: [id])
+  returnAllocations ReturnAllocation[]
+
+  @@index([storeId])
+  @@index([orderItemId, sequence])
+  @@map("order_allocations")
+}
+
+/**
+ * One customer-submitted return request, which may cover several order items at once.
+ * Returns are processed automatically (no admin approval step) — this project has no payment/
+ * refund system, so this table records the return and the order's live totals are recalculated;
+ * it does not represent a completed financial refund.
+ */
+model Return {
+  id                String   @id @default(uuid())
+  orderId           String   @map("order_id")
+  customerId        String   @map("customer_id")
+  // Sum of this return's ReturnItem.returnAmount — gross value of the returned units at their
+  // original unit price. This is a record of what was returned, not a refund confirmation.
+  totalReturnAmount Decimal  @db.Decimal(10, 2) @map("total_return_amount")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  order    Order        @relation(fields: [orderId], references: [id])
+  customer User         @relation(fields: [customerId], references: [id])
+  items    ReturnItem[]
+
+  @@index([orderId, createdAt])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id           String  @id @default(uuid())
+  returnId     String  @map("return_id")
+  orderItemId  String  @map("order_item_id")
+  productId    String  @map("product_id")
+  quantity     Int
+  unitPrice    Decimal @db.Decimal(10, 2) @map("unit_price")
+  returnAmount Decimal @db.Decimal(10, 2) @map("return_amount")
+
+  return      Return             @relation(fields: [returnId], references: [id])
+  orderItem   OrderItem          @relation(fields: [orderItemId], references: [id])
+  product     Product            @relation(fields: [productId], references: [id])
+  allocations ReturnAllocation[]
+
+  @@index([returnId])
+  @@index([orderItemId])
+  @@map("return_items")
+}
+
+/** Restoration record — always tied to the exact OrderAllocation (store) it's undoing. */
+model ReturnAllocation {
+  id                String @id @default(uuid())
+  returnItemId      String @map("return_item_id")
+  orderAllocationId String @map("order_allocation_id")
+  storeId           String @map("store_id")
+  quantity          Int
+
+  returnItem      ReturnItem      @relation(fields: [returnItemId], references: [id])
+  orderAllocation OrderAllocation @relation(fields: [orderAllocationId], references: [id])
+  store           Store           @relation(fields: [storeId], references: [id])
+
+  @@index([returnItemId])
+  @@index([orderAllocationId])
+  @@map("return_allocations")
+}

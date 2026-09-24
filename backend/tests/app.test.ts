@@ -95,7 +95,7 @@ describe('app foundation', () => {
   });
 
   it('accepts protected routes with a valid token', async () => {
-    const token = app.jwt.sign({ sub: 'user-123' });
+    const token = app.jwt.sign({ sub: 'user-123', role: 'CUSTOMER' });
     const res = await app.inject({
       method: 'GET',
       url: '/__test/protected',

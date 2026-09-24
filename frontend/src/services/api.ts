@@ -18,12 +18,29 @@ export const api = axios.create({
 });
 
 // ---- Auth token -----------------------------------------------------------
-// Kept in memory by default (cleared on page reload, not readable by other scripts
-// via storage). Decide on persistence once the auth requirements are known.
-let authToken: string | null = null;
+// Persisted to localStorage so the demo survives a page reload. MVP tradeoff:
+// readable by any script on the page (XSS risk); acceptable for a test/demo,
+// revisit with an httpOnly cookie for a real deployment.
+const TOKEN_STORAGE_KEY = 'auth_token';
+
+function readStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+let authToken: string | null = readStoredToken();
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // localStorage unavailable (private mode, etc.) — token still works in-memory this session.
+  }
 }
 
 api.interceptors.request.use((config) => {
